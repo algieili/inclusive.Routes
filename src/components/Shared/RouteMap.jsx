@@ -124,12 +124,11 @@ export default function RouteMap() {
 
     // Initialize Mapbox Map
     useEffect(() => {
-        if (!mapContainer.current || mapInstance.current) return;
+        if (!mapContainer.current) return;
 
         // Safety: If no token, still allow the UI to mount but log error
         if (!token) {
             console.error("Mapbox Access Token is missing!");
-            // We set mapLoaded to true anyway after a delay to allow UI to show up without map
             setTimeout(() => setMapLoaded(true), 2000);
             return;
         }
@@ -143,8 +142,14 @@ export default function RouteMap() {
                 zoom: 15,
                 pitch: 45,
                 attributionControl: false,
-                logoPosition: 'bottom-right'
+                logoPosition: 'bottom-right',
+                preserveDrawingBuffer: true
             });
+
+            const resizeObserver = new ResizeObserver(() => {
+                if (map) map.resize();
+            });
+            resizeObserver.observe(mapContainer.current);
 
             map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
 
@@ -155,11 +160,11 @@ export default function RouteMap() {
                 el.className = 'user-marker';
                 el.innerHTML = `
                     <div style="display: flex; flex-direction: column; align-items: center; pointer-events: none;">
-                        <div id="user-location-label" style="background: white; color: #2563EB; padding: 8px 16px; border-radius: 12px; margin-bottom: 8px; font-weight: 900; font-size: 14px; white-space: nowrap; box-shadow: 0 10px 25px rgba(0,0,0,0.2); border: 3px solid #2563EB; text-transform: uppercase; font-style: italic; display: none; position: relative;">
+                        <div id="user-location-label" style="background: white; color: #2563EB; padding: 6px 12px; border-radius: 10px; margin-bottom: 6px; font-weight: 900; font-size: 11px; white-space: nowrap; box-shadow: 0 8px 20px rgba(0,0,0,0.15); border: 2.5px solid #2563EB; text-transform: uppercase; font-style: italic; display: none; position: relative;">
                             Locating...
-                            <div style="position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 8px solid #2563EB;"></div>
+                            <div style="position: absolute; bottom: -7px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 7px solid #2563EB;"></div>
                         </div>
-                        <div style="font-size: 64px; filter: drop-shadow(0 6px 15px rgba(0,0,0,0.4)); transform: scaleX(-1);">🚌</div>
+                        <div style="font-size: 42px; filter: drop-shadow(0 5px 12px rgba(0,0,0,0.3)); transform: scaleX(-1);">🚌</div>
                     </div>
                 `;
 
@@ -173,22 +178,21 @@ export default function RouteMap() {
 
             map.on('error', (e) => {
                 console.error('Mapbox error:', e);
-                setMapLoaded(true); // Don't hang forever
+                setMapLoaded(true);
             });
+
+            return () => {
+                resizeObserver.disconnect();
+                if (map) {
+                    map.remove();
+                    mapInstance.current = null;
+                }
+            }
 
         } catch (e) {
             console.error('Error initializing Mapbox:', e);
             setMapLoaded(true);
         }
-
-        return () => {
-            if (mapInstance.current) {
-                mapInstance.current.remove();
-                mapInstance.current = null;
-            }
-            if (watchIdRef.current) navigator.geolocation.clearWatch(watchIdRef.current);
-            if (animationIntervalRef.current) clearInterval(animationIntervalRef.current);
-        };
     }, []);
 
     // Arrival Detection logic

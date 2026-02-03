@@ -2,12 +2,12 @@
 
 @layer base {
   html {
-    font-size: 18px;
+    font-size: 16px;
   }
 
   body {
-    background-color: #f8fafc;
-    color: #0f172a;
+    background-color: #0B1221;
+    color: #f8fafc;
     line-height: 1.6;
   }
 

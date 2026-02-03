@@ -66,8 +66,8 @@ export default function ConductorDashboard() {
                     key={tab}
                     onClick={() => setActiveTab(tab)}
                     className={`flex-1 py-3 rounded-full text-[0.6rem] font-black uppercase tracking-widest transition-all duration-300 ${activeTab === tab
-                            ? 'bg-blue-600 text-white shadow-lg'
-                            : accessibility.highContrast ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'
+                        ? 'bg-blue-600 text-white shadow-lg'
+                        : accessibility.highContrast ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'
                         }`}
                 >
                     {tab}
@@ -402,14 +402,14 @@ export default function ConductorDashboard() {
     };
 
     return (
-        <div className={`min-h-screen relative overflow-hidden flex flex-col items-center transition-colors duration-500 ${accessibility.highContrast ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'}`}>
+        <div className={`min-h-[100dvh] relative overflow-hidden flex flex-col items-center transition-colors duration-500 ${accessibility.highContrast ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'}`}>
             {/* Map Background Layer (Fixed & Blurred) */}
             <div className="absolute inset-0 z-0 opacity-20 filter grayscale contrast-125">
                 <RouteMap />
                 <div className={`absolute inset-0 ${accessibility.highContrast ? 'bg-slate-950/60' : 'bg-white/40'}`}></div>
             </div>
 
-            <div className={`w-full max-w-[480px] h-full relative flex flex-col shadow-[0_0_100px_rgba(0,0,0,0.4)] transition-all overflow-hidden ${accessibility.highContrast ? 'bg-slate-900/40 backdrop-blur-3xl' : 'bg-white/10'}`}>
+            <div className={`w-full max-w-[480px] h-[100dvh] relative flex flex-col shadow-[0_0_100px_rgba(0,0,0,0.4)] transition-all overflow-hidden ${accessibility.highContrast ? 'bg-slate-900/40 backdrop-blur-3xl' : 'bg-white/10'}`}>
 
                 <div className="flex-1 overflow-y-auto pb-36 scrollbar-hide relative">
                     {renderHeader()}

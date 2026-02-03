@@ -231,8 +231,8 @@ export default function PassengerDashboard() {
     };
 
     return (
-        <div className={`relative h-screen overflow-hidden flex flex-col items-center transition-colors duration-500 ${accessibility.highContrast ? 'bg-slate-950 text-white' : 'bg-slate-900'}`}>
-            <div className={`w-full max-w-[480px] h-full relative flex flex-col shadow-2xl`}>
+        <div className={`relative h-[100dvh] w-full overflow-hidden flex flex-col items-center transition-colors duration-500 ${accessibility.highContrast ? 'bg-slate-950 text-white' : 'bg-slate-900'}`}>
+            <div className={`w-full max-w-[480px] h-full relative flex flex-col shadow-2xl bg-white`}>
                 <div className="absolute inset-0 z-0">
                     <RouteMap />
                 </div>

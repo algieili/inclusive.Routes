@@ -56,8 +56,8 @@ export default function NavigationRoute() {
     };
 
     return (
-        <div className={`relative h-screen overflow-hidden flex flex-col items-center transition-colors duration-500 ${accessibility.highContrast ? 'bg-slate-950 text-white' : 'bg-slate-900 text-slate-900'}`}>
-            <div className={`w-full max-w-[480px] h-full relative flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.5)] ${accessibility.highContrast ? 'bg-slate-900/50' : ''}`}>
+        <div className={`relative h-[100dvh] w-full overflow-hidden flex flex-col items-center transition-colors duration-500 ${accessibility.highContrast ? 'bg-slate-950 text-white' : 'bg-slate-900 text-slate-900'}`}>
+            <div className={`w-full max-w-[480px] h-full relative flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.5)] bg-white ${accessibility.highContrast ? 'bg-slate-900/50' : ''}`}>
 
                 {/* 1. Map Layer */}
                 <div className="absolute inset-0 z-0">
@@ -141,24 +141,46 @@ export default function NavigationRoute() {
 
                 {/* 5. E-Receipt Overlay */}
                 {view === 'receipt' && (
-                    <div className="absolute inset-0 z-[70] bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-10 animate-in fade-in duration-500">
-                        <div className={`rounded-[5rem] w-full shadow-[0_60px_120px_rgba(0,0,0,0.9)] overflow-hidden transition-all ${accessibility.highContrast ? 'bg-slate-900 border-2 border-green-500' : 'bg-white'}`}>
-                            <div className="bg-green-500 p-14 text-center text-white relative">
-                                <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-bl-full"></div>
-                                <div className="w-28 h-28 bg-white/20 rounded-[2.8rem] flex items-center justify-center mx-auto mb-8 shadow-inner border border-white/30">
-                                    <CheckCircle size={60} strokeWidth={4} />
+                    <div className="absolute inset-0 z-[70] bg-black/90 backdrop-blur-3xl flex flex-col items-center justify-center p-6 animate-in fade-in duration-700">
+                        <div className={`rounded-[2.5rem] w-full max-w-[400px] shadow-[0_40px_80px_rgba(0,0,0,0.8)] overflow-hidden transition-all border border-white/10 ${accessibility.highContrast ? 'bg-slate-900 border-2 border-green-500' : 'bg-white'}`}>
+                            {/* Receipt Header */}
+                            <div className="bg-green-500 p-10 text-center text-white relative">
+                                <div className="absolute -top-10 -right-10 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
+                                <div className="w-20 h-20 bg-white/20 rounded-[1.8rem] flex items-center justify-center mx-auto mb-6 shadow-xl border border-white/30 backdrop-blur-md">
+                                    <CheckCircle size={40} strokeWidth={4} />
                                 </div>
-                                <h2 className="text-4xl font-black italic uppercase tracking-tighter leading-tight drop-shadow-md">PAYMENT<br />SUCCESS</h2>
-                                <p className="text-[0.8rem] font-black text-green-100 uppercase tracking-[0.4em] mt-6 italic animate-pulse">
-                                    "ipakita po sa conductor"
-                                </p>
+                                <h1 className="text-3xl font-black italic uppercase tracking-tighter leading-tight drop-shadow-md">PAYMENT<br />SUCCESS</h1>
+                                <div className="mt-4 flex flex-col items-center space-y-1">
+                                    <p className="text-[0.6rem] font-bold text-green-100 uppercase tracking-[0.2em] italic">Transaction ID: IR-9923410</p>
+                                    <p className="text-[0.6rem] font-bold text-green-100 uppercase tracking-[0.2em] italic">{new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }).toUpperCase()}</p>
+                                </div>
                             </div>
-                            <div className="p-14 text-center">
-                                <p className="text-slate-400 font-black text-[0.75rem] uppercase tracking-widest mb-4 italic">Official Receipt Amount</p>
-                                <h1 className={`font-black text-slate-800 tracking-tighter italic mb-12 ${accessibility.largeText ? 'text-9xl' : 'text-8xl'} ${accessibility.highContrast ? 'text-white' : ''}`}>₱{fareDetails?.netFare}</h1>
-                                <button onClick={handleFinishTrip} className={`w-full font-black py-8 rounded-[3rem] uppercase tracking-[0.5em] text-xs flex items-center justify-center space-x-5 active:scale-95 transition-all shadow-[0_20px_40px_-10px_rgba(30,41,59,0.5)] ${accessibility.highContrast ? 'bg-white text-slate-900' : 'bg-slate-900 text-white'}`}>
-                                    <span>Finish Trip</span>
-                                    <ChevronRight size={24} strokeWidth={4} />
+
+                            {/* Receipt Content */}
+                            <div className="p-8 pb-10 text-center">
+                                <div className="mb-8 p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
+                                    <p className="text-slate-400 font-bold text-[0.65rem] uppercase tracking-widest mb-2 italic">Official Fare Amount</p>
+                                    <h2 className={`font-black text-slate-800 tracking-tighter italic ${accessibility.largeText ? 'text-8xl' : 'text-7xl'} ${accessibility.highContrast ? 'text-white' : ''}`}>₱{fareDetails?.netFare}</h2>
+                                </div>
+
+                                <div className="space-y-4 mb-10">
+                                    <div className="flex justify-between items-center px-2">
+                                        <span className="text-[0.65rem] font-black text-slate-400 uppercase tracking-widest italic">Destination</span>
+                                        <span className="text-[0.7rem] font-black text-slate-700 uppercase italic truncate max-w-[150px]">{routeData.destination}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center px-2">
+                                        <span className="text-[0.65rem] font-black text-slate-400 uppercase tracking-widest italic">Payment Method</span>
+                                        <span className="text-[0.7rem] font-black text-slate-700 uppercase italic">{selectedPaymentMethod || 'E-Wallet'}</span>
+                                    </div>
+                                    <div className="w-full border-t border-dashed border-slate-200 my-4"></div>
+                                    <p className="text-[0.75rem] font-black text-green-600 uppercase tracking-[0.3em] italic animate-pulse">
+                                        "i-present po ito sa driver"
+                                    </p>
+                                </div>
+
+                                <button onClick={handleFinishTrip} className={`w-full font-black py-7 rounded-[2rem] uppercase tracking-[0.4em] text-xs flex items-center justify-center space-x-4 active:scale-95 transition-all shadow-2xl ${accessibility.highContrast ? 'bg-white text-slate-900 shadow-white/10' : 'bg-slate-900 text-white shadow-slate-900/40'}`}>
+                                    <span>Proceed to Nav</span>
+                                    <ChevronRight size={22} strokeWidth={4} />
                                 </button>
                             </div>
                         </div>
