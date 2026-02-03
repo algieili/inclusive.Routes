@@ -13,7 +13,12 @@ import MainLayout from './components/Layout/MainLayout';
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, loading } = useAuth();
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return (
+    <div className="min-h-screen bg-[#0B1221] flex flex-col items-center justify-center p-10">
+      <div className="w-24 h-24 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mb-8 shadow-[0_0_40px_rgba(59,130,246,0.3)]"></div>
+      <h2 className="text-white text-xl font-black tracking-[0.5em] uppercase italic animate-pulse">Initializing System</h2>
+    </div>
+  );
   if (!user) return <Navigate to="/" />;
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/" />; // Or unauthorized page

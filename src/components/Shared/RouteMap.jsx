@@ -1,14 +1,38 @@
 import React, { useEffect, useRef, useState } from 'react';
+import mapboxgl from 'mapbox-gl';
+import { Compass } from 'lucide-react';
 import { useRoute } from '../../context/RouteContext';
 import { getRouteByDestination } from '../../utils/mockRoutes';
+import { reverseGeocode } from '../../utils/mapUtils';
+
+// Helper to calculate distance
+const getDistanceFromLatLonInMeters = (lat1, lon1, lat2, lon2) => {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+};
+
+// Set token safely
+const token = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
+if (token) {
+    mapboxgl.accessToken = token;
+}
 
 export default function RouteMap() {
     const mapContainer = useRef(null);
     const mapInstance = useRef(null);
-    const markersRef = useRef([]);
-    const routeLineRef = useRef(null);
-    const directionsRendererRef = useRef(null);
     const watchIdRef = useRef(null);
+    const animationIntervalRef = useRef(null);
+    const destMarkerRef = useRef(null);
+    const userMarkerRef = useRef(null);
+
     const [mapLoaded, setMapLoaded] = useState(false);
     const [currentPosition, setCurrentPosition] = useState(null);
     const [hasArrived, setHasArrived] = useState(false);
@@ -21,363 +45,295 @@ export default function RouteMap() {
         currentRouteRef.current = currentRoute;
     }, [currentRoute]);
 
-    // Initialize Google Map
+    // Animate line utility
+    const animateLine = (map, coordinates) => {
+        if (!map || !coordinates) return;
+        let i = 0;
+        const total = coordinates.length;
+        const currentPath = [];
+
+        if (animationIntervalRef.current) clearInterval(animationIntervalRef.current);
+
+        animationIntervalRef.current = setInterval(() => {
+            if (i < total) {
+                currentPath.push(coordinates[i]);
+                const source = map.getSource('route');
+                if (source) {
+                    source.setData({
+                        type: 'Feature',
+                        geometry: {
+                            type: 'LineString',
+                            coordinates: currentPath
+                        }
+                    });
+                }
+                i++;
+            } else {
+                clearInterval(animationIntervalRef.current);
+            }
+        }, 30);
+    };
+
+    // Location Tracking setup
+    const startLocationTracking = (map) => {
+        if (!map) return;
+        if ('geolocation' in navigator) {
+            if (userMarkerRef.current) {
+                const el = userMarkerRef.current.getElement();
+                if (el) el.style.transition = 'transform 0.5s ease-out';
+            }
+
+            watchIdRef.current = navigator.geolocation.watchPosition(async (position) => {
+                const { longitude: lng, latitude: lat } = position.coords;
+                const pos = { lat, lng };
+
+                setCurrentPosition(pos);
+                if (userMarkerRef.current) {
+                    userMarkerRef.current.setLngLat([lng, lat]);
+                }
+
+                if (!userMarkerRef.current) return;
+                const labelEl = userMarkerRef.current.getElement().querySelector('#user-location-label');
+                if (labelEl) {
+                    const currentLabel = labelEl.innerText;
+                    if (currentLabel === 'Your Location' || Math.random() < 0.1) {
+                        try {
+                            const address = await reverseGeocode(lng, lat, token);
+                            if (address) {
+                                labelEl.innerText = address.split(',')[0].toUpperCase();
+                                labelEl.style.display = 'block';
+                            }
+                        } catch (e) {
+                            console.error('Geocoding error:', e);
+                        }
+                    }
+                }
+
+                if (!currentRouteRef.current && map) {
+                    map.easeTo({
+                        center: [lng, lat],
+                        zoom: map.getZoom() < 14 ? 15 : map.getZoom(),
+                        duration: 1000
+                    });
+                }
+            },
+                (error) => console.error('GPS Navigation Error:', error.message),
+                { enableHighAccuracy: true, timeout: 5000, maximumAge: 1000 });
+        }
+    };
+
+    // Initialize Mapbox Map
     useEffect(() => {
         if (!mapContainer.current || mapInstance.current) return;
 
-        const initMap = () => {
-            if (!window.google || !window.google.maps) {
-                setTimeout(initMap, 100);
-                return;
-            }
+        // Safety: If no token, still allow the UI to mount but log error
+        if (!token) {
+            console.error("Mapbox Access Token is missing!");
+            // We set mapLoaded to true anyway after a delay to allow UI to show up without map
+            setTimeout(() => setMapLoaded(true), 2000);
+            return;
+        }
 
-            const map = new window.google.maps.Map(mapContainer.current, {
-                center: { lat: 14.32, lng: 121.08 },
+        let map;
+        try {
+            map = new mapboxgl.Map({
+                container: mapContainer.current,
+                style: 'mapbox://styles/mapbox/streets-v12',
+                center: [121.08, 14.32],
                 zoom: 15,
-                mapTypeControl: false,
-                streetViewControl: false,
-                fullscreenControl: false,
-                zoomControl: true,
-                styles: [
-                    {
-                        featureType: 'all',
-                        elementType: 'labels.text.fill',
-                        stylers: [{ color: '#333333' }]
-                    }
-                ]
+                pitch: 45,
+                attributionControl: false,
+                logoPosition: 'bottom-right'
             });
 
-            mapInstance.current = map;
+            map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+            map.on('load', () => {
+                mapInstance.current = map;
+
+                const el = document.createElement('div');
+                el.className = 'user-marker';
+                el.innerHTML = `
+                    <div style="display: flex; flex-direction: column; align-items: center; pointer-events: none;">
+                        <div id="user-location-label" style="background: white; color: #2563EB; padding: 8px 16px; border-radius: 12px; margin-bottom: 8px; font-weight: 900; font-size: 14px; white-space: nowrap; box-shadow: 0 10px 25px rgba(0,0,0,0.2); border: 3px solid #2563EB; text-transform: uppercase; font-style: italic; display: none; position: relative;">
+                            Locating...
+                            <div style="position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 8px solid #2563EB;"></div>
+                        </div>
+                        <div style="font-size: 64px; filter: drop-shadow(0 6px 15px rgba(0,0,0,0.4)); transform: scaleX(-1);">🚌</div>
+                    </div>
+                `;
+
+                userMarkerRef.current = new mapboxgl.Marker({ element: el, anchor: 'center' })
+                    .setLngLat([121.08, 14.32])
+                    .addTo(map);
+
+                startLocationTracking(map);
+                setMapLoaded(true);
+            });
+
+            map.on('error', (e) => {
+                console.error('Mapbox error:', e);
+                setMapLoaded(true); // Don't hang forever
+            });
+
+        } catch (e) {
+            console.error('Error initializing Mapbox:', e);
             setMapLoaded(true);
-
-            // Add Traffic Layer
-            const trafficLayer = new window.google.maps.TrafficLayer();
-            trafficLayer.setMap(map);
-
-            // Initialize DirectionsRenderer
-            directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
-                map: map,
-                suppressMarkers: true,
-                polylineOptions: {
-                    strokeColor: '#3B82F6',
-                    strokeWeight: 6,
-                    strokeOpacity: 0.9
-                }
-            });
-
-            // Start basic location tracking for the "Blue Dot"
-            startLocationPulse();
-        };
-
-        const startLocationPulse = () => {
-            if ('geolocation' in navigator) {
-                const userMarker = new window.google.maps.Marker({
-                    map: mapInstance.current,
-                    label: {
-                        text: '🚌',
-                        fontSize: '28px'
-                    },
-                    icon: {
-                        path: window.google.maps.SymbolPath.CIRCLE,
-                        scale: 1, // Minimize the circle, let the emoji lead
-                        fillOpacity: 0,
-                        strokeOpacity: 0
-                    },
-                    zIndex: 100,
-                    title: 'Current Jeepney Location'
-                });
-
-                watchIdRef.current = navigator.geolocation.watchPosition((position) => {
-                    const pos = {
-                        lat: position.coords.latitude,
-                        lng: position.coords.longitude
-                    };
-                    setCurrentPosition(pos);
-                    userMarker.setPosition(pos);
-
-                    // Only center if we haven't selected a route yet
-                    if (!currentRouteRef.current) {
-                        mapInstance.current.setCenter(pos);
-                    }
-                }, (error) => console.log('GPS Error', error), { enableHighAccuracy: true });
-            }
-        };
-
-        initMap();
+        }
 
         return () => {
-            if (watchIdRef.current) {
-                navigator.geolocation.clearWatch(watchIdRef.current);
+            if (mapInstance.current) {
+                mapInstance.current.remove();
+                mapInstance.current = null;
             }
+            if (watchIdRef.current) navigator.geolocation.clearWatch(watchIdRef.current);
+            if (animationIntervalRef.current) clearInterval(animationIntervalRef.current);
         };
     }, []);
 
-    // Reactive Arrival Detection & Distance Update
+    // Arrival Detection logic
     useEffect(() => {
-        if (!currentRoute || !currentRoute.destinationLocation || !currentPosition || !window.google || !window.google.maps.geometry) return;
+        if (!currentRoute || !currentPosition) return;
 
-        const google = window.google;
-        const userLatLng = new google.maps.LatLng(currentPosition.lat, currentPosition.lng);
-        const destLatLng = new google.maps.LatLng(
-            currentRoute.destinationLocation.lat,
-            currentRoute.destinationLocation.lng
+        let destLat, destLng;
+        if (currentRoute.destinationLocation) {
+            destLat = currentRoute.destinationLocation.lat;
+            destLng = currentRoute.destinationLocation.lng;
+        } else if (currentRoute.destination && typeof currentRoute.destination !== 'string' && currentRoute.destination.coordinates) {
+            [destLng, destLat] = currentRoute.destination.coordinates;
+        } else {
+            return;
+        }
+
+        const distanceMeters = getDistanceFromLatLonInMeters(
+            currentPosition.lat, currentPosition.lng,
+            destLat, destLng
         );
 
-        const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, destLatLng);
-
-        // Update live distance display
         if (distanceMeters > 1000) {
             setLiveDistance(`${(distanceMeters / 1000).toFixed(1)} KM`);
         } else {
             setLiveDistance(`${Math.round(distanceMeters)} M`);
         }
 
-        // If within 50 meters, consider arrived
         if (distanceMeters < 50 && !hasArrived) {
             setHasArrived(true);
-            // Optionally stop tracking
-            if (watchIdRef.current) {
-                // Keep tracking but mark as arrived
-            }
         }
     }, [currentPosition, currentRoute, hasArrived]);
 
-    // Update route when currentRoute changes
+    // Route Update logic
     useEffect(() => {
         if (!mapLoaded || !mapInstance.current || !currentRoute) return;
-
         const map = mapInstance.current;
-        const google = window.google;
-
-        // Clear existing markers and route
-        markersRef.current.forEach(marker => marker.setMap(null));
-        markersRef.current = [];
-        if (routeLineRef.current) {
-            routeLineRef.current.setMap(null);
-            routeLineRef.current = null;
-        }
-
-        // Check if we should use real GPS-based directions
-        if (currentRoute.useRealDirections && currentRoute.origin && currentRoute.destinationLocation) {
-            displayRealRoute(map, google, currentRoute);
-        } else {
-            displayMockRoute(map, google, currentRoute);
-        }
-
-    }, [mapLoaded, currentRoute]);
-
-    // Display route using Google Directions API (GPS-based)
-    const displayRealRoute = (map, google, routeData) => {
-        const directionsService = new google.maps.DirectionsService();
-
-        const request = {
-            origin: new google.maps.LatLng(routeData.origin.lat, routeData.origin.lng),
-            destination: new google.maps.LatLng(routeData.destinationLocation.lat, routeData.destinationLocation.lng),
-            travelMode: google.maps.TravelMode.DRIVING,
-            region: 'ph',
-            avoidHighways: false, // JEEPNEY ONLY ON MAIN ROADS
-            avoidTolls: false,
-            optimizeWaypoints: true
-        };
-
-        directionsService.route(request, (result, status) => {
-            if (status === 'OK') {
-                directionsRendererRef.current.setDirections(result);
-
-                // Add custom markers
-                const route = result.routes[0];
-                const leg = route.legs[0];
-
-                // Destination marker (teal)
-                const destMarker = new google.maps.Marker({
-                    position: leg.end_location,
-                    map: map,
-                    icon: {
-                        path: google.maps.SymbolPath.CIRCLE,
-                        scale: 14,
-                        fillColor: '#14B8A6',
-                        fillOpacity: 1,
-                        strokeColor: '#FFFFFF',
-                        strokeWeight: 4
-                    },
-                    label: {
-                        text: '🎯',
-                        fontSize: '22px'
-                    },
-                    title: routeData.destination
-                });
-                markersRef.current.push(destMarker);
-
-                // Fit map to route
-                map.fitBounds(result.routes[0].bounds, {
-                    top: 150,
-                    bottom: 350,
-                    left: 60,
-                    right: 60
-                });
-
-            } else {
-                displayMockRoute(map, google, routeData);
+        const addRouteToMap = (map, coordinates, endPoint, destinationName) => {
+            if (!map || !coordinates) return;
+            if (map.getLayer('route-line')) map.removeLayer('route-line');
+            if (map.getSource('route')) map.removeSource('route');
+            if (destMarkerRef.current) {
+                destMarkerRef.current.remove();
+                destMarkerRef.current = null;
             }
-        });
-    };
 
-    // Display mock route data
-    const displayMockRoute = (map, google, routeData) => {
-        const mockRouteData = getRouteByDestination(routeData.destination);
-        if (!mockRouteData) return;
-        const { origin, destination, routeLine } = mockRouteData;
+            const el = document.createElement('div');
+            el.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; pointer-events: none;">
+                    <div style="background: white; padding: 10px 24px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.3); margin-bottom: 2px; border: 4px solid #2563EB; animation: float 2s ease-in-out infinite;">
+                        <span style="font-size: 18px; font-weight: 900; white-space: nowrap; color: #1E293B; text-transform: uppercase; font-style: italic;">
+                            ${destinationName || 'Destination'}
+                        </span>
+                    </div>
+                    <div style="font-size: 84px; filter: drop-shadow(0 15px 25px rgba(0,0,0,0.4)); animation: pin-bounce 1s ease-out;">📍</div>
+                </div>
+            `;
 
-        // Create end marker (teal)
-        const endMarker = new google.maps.Marker({
-            position: { lat: destination.coordinates[1], lng: destination.coordinates[0] },
-            map: map,
-            icon: {
-                path: google.maps.SymbolPath.CIRCLE,
-                scale: 14,
-                fillColor: '#14B8A6',
-                fillOpacity: 1,
-                strokeColor: '#FFFFFF',
-                strokeWeight: 4
-            },
-            label: {
-                text: '🚌',
-                fontSize: '24px'
-            },
-            title: destination.name,
-            animation: google.maps.Animation.BOUNCE
-        });
-        markersRef.current.push(endMarker);
+            destMarkerRef.current = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+                .setLngLat(endPoint)
+                .addTo(map);
 
-        setTimeout(() => endMarker.setAnimation(null), 2000);
-
-        const path = routeLine.map(coord => ({
-            lat: coord[1],
-            lng: coord[0]
-        }));
-
-        animateRoute(map, path, google);
-
-        const bounds = new google.maps.LatLngBounds();
-        path.forEach(point => bounds.extend(point));
-        map.fitBounds(bounds, {
-            top: 150,
-            bottom: 350,
-            left: 60,
-            right: 60
-        });
-    };
-
-    // Animate route line drawing
-    const animateRoute = (map, fullPath, google) => {
-        const duration = 2500;
-        const startTime = Date.now();
-        let currentPolyline = null;
-
-        const animate = () => {
-            const elapsed = Date.now() - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-
-            const pointCount = Math.max(2, Math.floor(fullPath.length * progress));
-            const currentPath = fullPath.slice(0, pointCount);
-
-            if (currentPolyline) currentPolyline.setMap(null);
-
-            currentPolyline = new google.maps.Polyline({
-                path: currentPath,
-                geodesic: true,
-                strokeColor: '#3B82F6',
-                strokeOpacity: 0.9,
-                strokeWeight: 8,
-                map: map
+            map.addSource('route', {
+                type: 'geojson',
+                data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } }
             });
 
-            if (progress < 1) {
-                requestAnimationFrame(animate);
-            } else {
-                routeLineRef.current = currentPolyline;
+            map.addLayer({
+                id: 'route-line',
+                type: 'line',
+                source: 'route',
+                layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: { 'line-color': '#2563EB', 'line-width': 14, 'line-opacity': 0.95 }
+            });
+
+            const bounds = new mapboxgl.LngLatBounds();
+            coordinates.forEach(coord => bounds.extend(coord));
+            map.fitBounds(bounds, { padding: { top: 180, bottom: 280, left: 60, right: 60 }, duration: 1000 });
+            animateLine(map, coordinates);
+        };
+
+        const displayRealRoute = async (map, routeData) => {
+            try {
+                const start = [routeData.origin.lng, routeData.origin.lat];
+                const end = [routeData.destinationLocation.lng, routeData.destinationLocation.lat];
+                const query = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${start[0]},${start[1]};${end[0]},${end[1]}?geometries=geojson&access_token=${token}`);
+                const json = await query.json();
+                if (json.routes && json.routes.length > 0) {
+                    addRouteToMap(map, json.routes[0].geometry.coordinates, end, routeData.destination);
+                } else {
+                    displayMockRoute(map, routeData);
+                }
+            } catch (e) {
+                displayMockRoute(map, routeData);
             }
         };
 
-        requestAnimationFrame(animate);
-    };
-
-    // Start real-time GPS navigation
-    const startNavigation = () => {
-        if (!('geolocation' in navigator)) {
-            alert('Geolocation not supported');
-            return;
-        }
-        contextStartNavigation();
-    };
-
-    // Expose startNavigation to parent
-    useEffect(() => {
-        window.startMapNavigation = startNavigation;
-        return () => {
-            delete window.startMapNavigation;
+        const displayMockRoute = (map, routeData) => {
+            const mock = getRouteByDestination(routeData.destination);
+            if (mock) addRouteToMap(map, mock.routeLine, mock.destination.coordinates, routeData.destination);
         };
-    }, []);
+
+        const origin = currentPosition || currentRoute.origin;
+        if (currentRoute.useRealDirections && origin && currentRoute.destinationLocation) {
+            displayRealRoute(map, { ...currentRoute, origin });
+        } else {
+            displayMockRoute(map, currentRoute);
+        }
+
+    }, [mapLoaded, currentRoute, isNavigating]);
 
     return (
-        <div className="absolute inset-0 w-full h-full bg-slate-100">
-            <div ref={mapContainer} className="absolute inset-0" />
+        <div className="absolute inset-0 w-full h-full bg-[#f8fafc]">
+            <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
 
-            {/* Loading animator */}
             {!mapLoaded && (
-                <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-50">
+                <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-[1000]">
                     <div className="flex flex-col items-center">
-                        <div className="w-16 h-16 border-8 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                        <p className="text-slate-800 font-black uppercase tracking-widest text-xs">Calibrating Map...</p>
+                        <div className="w-12 h-12 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+                        <p className="text-slate-500 font-bold italic text-sm">Loading...</p>
                     </div>
                 </div>
             )}
 
-            {/* GPS Pulse Indicator */}
             {isNavigating && !hasArrived && (
-                <div className="absolute top-24 left-6 bg-blue-600 text-white px-5 py-3 rounded-2xl shadow-2xl z-20 flex items-center space-x-3 border border-white/20 animate-in fade-in slide-in-from-left-5">
-                    <div className="relative flex h-5 w-5 bg-white/20 rounded-full items-center justify-center">
-                        <span className="text-sm">🚌</span>
+                <div className="absolute top-28 left-6 bg-blue-600 text-white px-5 py-3 rounded-2xl shadow-2xl z-30 flex items-center space-x-3 border border-white/20">
+                    <div className="relative h-4 w-4">
+                        <span className="animate-ping absolute h-full w-full rounded-full bg-white opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-4 w-4 bg-white"></span>
                     </div>
-                    <span className="text-[0.65rem] font-black uppercase tracking-[0.2em] italic">Jeepney Tracking Active</span>
+                    <span className="text-[0.6rem] font-black uppercase tracking-[0.2em] italic">Tracking Active</span>
                 </div>
             )}
 
-            {/* LIVE JOURNEY MONITOR (DYNAMIC) */}
             {currentRoute && isNavigating && !hasArrived && (
-                <div className="absolute top-24 right-6 bg-white/95 backdrop-blur-md px-6 py-4 rounded-[2rem] shadow-2xl border border-blue-50 z-20 flex flex-col items-end animate-in fade-in slide-in-from-right-5">
-                    <span className="text-[0.6rem] font-black text-blue-500 uppercase tracking-[0.3em] mb-1">Time to Destination</span>
-                    <div className="flex items-center space-x-2">
-                        <span className="text-3xl font-black text-slate-800 tracking-tighter italic">{liveDistance || currentRoute.distance}</span>
-                        <span className="text-[0.6rem] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-1 rounded-lg">Pending</span>
-                    </div>
+                <div className="absolute top-28 right-6 bg-white/95 backdrop-blur-md px-6 py-4 rounded-[2rem] shadow-2xl z-20 flex flex-col items-end border border-blue-50">
+                    <span className="text-[0.5rem] font-black text-blue-500 uppercase tracking-[0.3em] mb-1">Distance to End</span>
+                    <span className="text-3xl font-black text-slate-800 tracking-tighter italic">{liveDistance || currentRoute.distance}</span>
                 </div>
             )}
 
-            {/* WOW ARRIVAL NOTIFICATION */}
             {hasArrived && (
                 <div className="absolute inset-0 z-[100] flex items-center justify-center p-8 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-700">
-                    <div className="bg-white rounded-[4rem] p-12 shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] text-center border-b-[12px] border-green-500 animate-in zoom-in-90 duration-500 max-w-sm w-full relative overflow-hidden">
-                        {/* Decorative background circle */}
-                        <div className="absolute -top-12 -right-12 w-48 h-48 bg-green-50 rounded-full blur-3xl opacity-50"></div>
-
-                        <div className="relative">
-                            <div className="w-32 h-32 bg-green-100 rounded-[3rem] flex items-center justify-center mx-auto mb-8 shadow-inner">
-                                <span className="text-7xl animate-bounce">🎯</span>
-                            </div>
-                            <h2 className="text-4xl font-black text-slate-900 mb-3 uppercase tracking-tighter leading-none italic">
-                                SUCCESS!<br />ARRIVED
-                            </h2>
-                            <p className="text-slate-400 font-black text-xs uppercase tracking-[0.4em] mb-10 leading-relaxed italic">
-                                "Maraming Salamat Po<br />sa Pag-Tiwala!"
-                            </p>
-                            <button
-                                onClick={() => setHasArrived(false)}
-                                className="w-full bg-slate-900 text-white font-black py-6 rounded-[2.5rem] shadow-2xl hover:bg-black transition-all active:scale-90 uppercase tracking-[0.3em] text-xs"
-                            >
-                                Leave Review
-                            </button>
-                        </div>
+                    <div className="bg-white rounded-[4rem] p-12 shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] text-center border-b-[12px] border-green-500 max-w-sm w-full relative overflow-hidden">
+                        <h2 className="text-4xl font-black text-slate-900 mb-3 uppercase tracking-tighter italic">ARRIVED</h2>
+                        <button onClick={() => setHasArrived(false)} className="w-full bg-slate-900 text-white font-black py-6 rounded-[2.5rem] mt-6">Finish Trip</button>
                     </div>
                 </div>
             )}

@@ -1,330 +1,284 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, MapPin, CreditCard, ChevronRight, Bus, Navigation } from 'lucide-react';
+import { MapPin, Navigation, Compass, Star, Clock, Heart, User, Home, Search, ChevronRight, Settings, LogOut, ShieldCheck, Sun, Moon, Eye, Volume2, ArrowLeft, Activity } from 'lucide-react';
 import { calculateFare } from '../utils/fareCalculator';
 import RouteMap from '../components/Shared/RouteMap';
 import { useRoute } from '../context/RouteContext';
+import { useAuth } from '../context/AuthContext';
+import { getDistanceKm, reverseGeocode } from '../utils/mapUtils';
 import PlacesAutocomplete from '../components/Shared/PlacesAutocomplete';
 
 export default function PassengerDashboard() {
     const navigate = useNavigate();
-    const { setRoute } = useRoute();
-    const [destination, setDestination] = useState('');
-    const [view, setView] = useState('search'); // 'search' | 'map' | 'payment' | 'receipt'
-    const [selectedRoute, setSelectedRoute] = useState(null);
-    const [paymentStatus, setPaymentStatus] = useState('idle');
-    const [receiptData, setReceiptData] = useState(null);
+    const { user, logout, accessibility, updateAccessibility } = useAuth();
+    const { setRoute, favorites, removeFavorite } = useRoute();
     const [currentLocation, setCurrentLocation] = useState(null);
     const [currentAddress, setCurrentAddress] = useState('');
-    const [locationError, setLocationError] = useState(null);
+    const [activeTab, setActiveTab] = useState('map');
+    const [profileView, setProfileView] = useState('main');
 
-    // Get user's current location and address
+    const toggleSetting = (key) => {
+        if (updateAccessibility) updateAccessibility({ [key]: !accessibility[key] });
+    };
+
     useEffect(() => {
         if ('geolocation' in navigator) {
             navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    const pos = {
-                        lat: position.coords.latitude,
-                        lng: position.coords.longitude
-                    };
+                async (position) => {
+                    const pos = { lat: position.coords.latitude, lng: position.coords.longitude };
                     setCurrentLocation(pos);
-
-                    // Reverse geocode to get address
-                    const google = window.google;
-                    if (google && google.maps && google.maps.Geocoder) {
-                        const geocoder = new google.maps.Geocoder();
-                        geocoder.geocode({ location: pos }, (results, status) => {
-                            if (status === 'OK' && results[0]) {
-                                // Extract a shorter version of the address if possible
-                                const addr = results[0].formatted_address;
-                                setCurrentAddress(addr.split(',').slice(0, 2).join(','));
-                            }
-                        });
+                    try {
+                        const token = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
+                        const address = await reverseGeocode(pos.lng, pos.lat, token);
+                        if (address) {
+                            setCurrentAddress(address.split(',')[0].toUpperCase());
+                        }
+                    } catch (e) {
+                        console.error('Geocoding error:', e);
                     }
                 },
                 (error) => {
                     console.error('Geolocation error:', error);
-                    setLocationError('Unable to get your location. Using default location.');
-                    // Fallback to San Pedro, Laguna
                     setCurrentLocation({ lat: 14.3553, lng: 121.0644 });
-                    setCurrentAddress('San Pedro, Laguna');
+                    setCurrentAddress('SAN PEDRO, LAGUNA');
                 }
             );
-        } else {
-            setLocationError('Geolocation not supported');
-            setCurrentLocation({ lat: 14.3553, lng: 121.0644 });
         }
     }, []);
 
-    // Mock Popular Destinations (kept for quick access)
     const popularDestinations = [
-        { name: "Crossing", location: "Coolbase iCity", color: "bg-orange-100 text-orange-600", iconC: "bg-orange-200" },
-        { name: "Pulo", location: "Coolbase Area", color: "bg-red-100 text-red-600", iconC: "bg-red-200" },
-        { name: "Market Area", location: "Midas iCity", color: "bg-green-100 text-green-600", iconC: "bg-green-200" },
-        { name: "Banlic", location: "Midas iCity", color: "bg-orange-100 text-orange-600", iconC: "bg-orange-200" },
-        { name: "Malaban", location: "Malaban iCity", color: "bg-blue-100 text-blue-600", iconC: "bg-blue-200" }
+        { name: "Crossing", location: "Coolbase iCity", coordinates: { lat: 14.3720, lng: 121.0950 } },
+        { name: "Pulo", location: "Coolbase Area", coordinates: { lat: 14.3650, lng: 121.0800 } },
+        { name: "Market Area", location: "Midas iCity", coordinates: { lat: 14.3800, lng: 121.1100 } }
     ];
 
-    const handleSearch = (e) => {
-        setDestination(e.target.value);
-    };
-
-    // Handle place selected from autocomplete
     const handlePlaceSelected = (place) => {
         if (!currentLocation) {
-            alert('Getting your location... Please try again.');
+            alert('Enabling GPS... Please try again.');
             return;
         }
 
-        // Calculate distance using Google Maps Geometry API
-        const google = window.google;
-        if (!google || !google.maps) return;
-
-        const origin = new google.maps.LatLng(currentLocation.lat, currentLocation.lng);
-        const dest = new google.maps.LatLng(place.location.lat, place.location.lng);
-        const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(origin, dest);
-        const distanceKm = (distanceMeters / 1000).toFixed(1);
+        const distanceKmVal = getDistanceKm(currentLocation.lat, currentLocation.lng, place.location.lat, place.location.lng);
+        const distanceKm = distanceKmVal.toFixed(1);
         const fare = calculateFare(parseFloat(distanceKm));
 
-        const routeData = {
+        setRoute({
             origin: currentLocation,
             destination: place.name,
             destinationLocation: place.location,
-            destinationAddress: place.address,
             distance: `${distanceKm} Km`,
             totalTime: `${Math.round(parseFloat(distanceKm) * 3)} min`,
-            transportOption: {
-                type: 'Jeepney',
-                route: `${place.name}`,
-                price: `₱${fare.netFare}`,
-                trafficStatus: 'Calculating...'
-            },
-            useRealDirections: true // Flag to use Google Directions API
-        };
-
-        setDestination(place.name);
-        setSelectedRoute(routeData);
-        setRoute(routeData);
+            transportOption: { type: 'Jeepney', price: `₱${fare.netFare}` },
+            useRealDirections: true
+        });
         navigate('/navigate');
     };
 
-    const handlePayment = (method) => {
-        setPaymentStatus('processing');
-        setTimeout(() => {
-            setPaymentStatus('success');
-            setReceiptData({
-                date: new Date().toLocaleString(),
-                amount: "39.00",
-                method: method
-            });
-            setView('receipt');
-            setPaymentStatus('idle');
-        }, 1500);
+    const NavButton = ({ id, icon: Icon, label }) => (
+        <button
+            onClick={() => { setActiveTab(id); if (id === 'profile') setProfileView('main'); }}
+            className={`flex flex-col items-center space-y-2 transition-all active:scale-90 ${activeTab === id ? 'text-blue-600 scale-110' : 'text-slate-300'}`}
+        >
+            <div className={`p-3 rounded-2xl transition-all ${activeTab === id ? 'bg-blue-50 text-blue-600 shadow-inner' : ''}`}>
+                <Icon size={26} strokeWidth={activeTab === id ? 4 : 2} />
+            </div>
+            <span className={`text-[0.6rem] font-black uppercase tracking-[0.2em] ${accessibility.largeText ? 'text-[0.7rem]' : ''} ${activeTab === id ? 'opacity-100' : 'opacity-40'}`}>{label}</span>
+        </button>
+    );
+
+    const renderFavorites = () => (
+        <div className={`absolute inset-x-0 top-0 bottom-24 z-[60] p-6 pt-24 overflow-y-auto ${accessibility.highContrast ? 'bg-slate-950 text-white' : 'bg-white text-slate-900'}`}>
+            <h2 className="text-3xl font-black mb-8 uppercase italic">Saved Places</h2>
+            <div className="space-y-4">
+                {favorites && favorites.map((fav, index) => (
+                    <button
+                        key={index}
+                        onClick={() => handlePlaceSelected({ name: fav.name, location: { lat: fav.coordinates[1], lng: fav.coordinates[0] }, address: fav.location })}
+                        className={`w-full p-6 border rounded-[2rem] flex items-center justify-between group ${accessibility.highContrast ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-100 hover:bg-blue-50'}`}
+                    >
+                        <div className="flex items-center space-x-5">
+                            <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center">
+                                <Star className="text-blue-600 fill-blue-600" size={24} />
+                            </div>
+                            <div className="text-left">
+                                <h3 className="font-black text-lg italic uppercase">{fav.name}</h3>
+                                <p className="text-slate-400 text-[0.6rem] font-black uppercase">{fav.location}</p>
+                            </div>
+                        </div>
+                        <ChevronRight className="text-slate-300" />
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+
+    const renderProfile = () => {
+        if (profileView === 'accessibility') {
+            return (
+                <div className="absolute inset-x-0 top-0 bottom-24 z-[60] bg-[#0B1221] p-6 pt-12 overflow-y-auto animate-in slide-in-from-right-10 duration-500 text-left">
+                    <button onClick={() => setProfileView('main')} className="flex items-center space-x-2 text-blue-400 mb-8 font-black uppercase text-[0.7rem] hover:text-white transition-colors">
+                        <ArrowLeft size={20} />
+                        <span>Back to Profile</span>
+                    </button>
+
+                    <h2 className="text-4xl font-black mb-8 italic tracking-tighter text-white uppercase italic">System Settings</h2>
+
+                    <div className="space-y-6">
+                        <button onClick={() => toggleSetting('highContrast')} className={`w-full flex items-center justify-between p-7 rounded-[2rem] border-2 transition-all ${accessibility.highContrast ? 'bg-blue-600 border-blue-400 text-white' : 'bg-[#151D2E]/80 border-white/5 text-slate-300'}`}>
+                            <div className="flex items-center space-x-5">
+                                <div className="p-4 bg-black/20 rounded-2xl">
+                                    {accessibility.highContrast ? <Sun size={28} /> : <Moon size={28} />}
+                                </div>
+                                <span className="font-extrabold text-xl italic uppercase tracking-tight">High Contrast</span>
+                            </div>
+                            <div className={`w-16 h-9 rounded-full p-1.5 transition-colors ${accessibility.highContrast ? 'bg-white/40' : 'bg-slate-700'}`}>
+                                <div className={`w-6 h-6 bg-white rounded-full transition-transform shadow-xl ${accessibility.highContrast ? 'translate-x-[1.75rem]' : 'translate-x-0'}`}></div>
+                            </div>
+                        </button>
+
+                        <button onClick={() => toggleSetting('largeText')} className={`w-full flex items-center justify-between p-7 rounded-[2rem] border-2 transition-all ${accessibility.largeText ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-[#151D2E]/80 border-white/5 text-slate-300'}`}>
+                            <div className="flex items-center space-x-5">
+                                <div className="p-4 bg-black/20 rounded-2xl">
+                                    <Eye size={28} />
+                                </div>
+                                <span className="font-extrabold text-xl italic uppercase tracking-tight">Large Text</span>
+                            </div>
+                            <div className={`w-16 h-9 rounded-full p-1.5 transition-colors ${accessibility.largeText ? 'bg-white/40' : 'bg-slate-700'}`}>
+                                <div className={`w-6 h-6 bg-white rounded-full transition-transform shadow-xl ${accessibility.largeText ? 'translate-x-[1.75rem]' : 'translate-x-0'}`}></div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div className="absolute inset-x-0 top-0 bottom-24 z-[60] bg-[#0B1221] p-6 pt-12 overflow-y-auto animate-in fade-in duration-500 text-center flex flex-col">
+                {/* Futuristic Header */}
+                <div className="flex items-center justify-between mb-12 px-2">
+                    <div className="flex items-center space-x-3">
+                        <div className="w-12 h-12 bg-white rounded-[1.2rem] flex items-center justify-center shadow-[0_0_20px_rgba(255,255,255,0.2)]">
+                            <MapPin className="text-red-500" size={28} fill="currentColor" />
+                        </div>
+                        <h1 className="text-2xl font-black tracking-tighter text-white italic">
+                            INCLUSIVE <span className="text-slate-400">ROUTE</span>
+                        </h1>
+                    </div>
+                    <div className="w-12 h-12 bg-[#151D2E] border border-white/10 rounded-[1.2rem] flex items-center justify-center text-slate-400">
+                        <Settings size={22} />
+                    </div>
+                </div>
+
+                {/* Avatar Section */}
+                <div className="relative mx-auto mb-10">
+                    <div className="w-44 h-44 rounded-[4rem] p-1.5 bg-gradient-to-tr from-blue-500 to-indigo-600 shadow-2xl relative">
+                        <div className="w-full h-full bg-[#1A2538] rounded-[3.8rem] overflow-hidden border-4 border-[#0B1221]">
+                            <img
+                                src="https://api.dicebear.com/7.x/avataaars/svg?seed=Morales&backgroundColor=b6e3f4&clothing=graphicShirt"
+                                alt="User Profile"
+                                className="w-full h-full object-cover"
+                            />
+                        </div>
+                        {/* Status Glow */}
+                        <div className="absolute bottom-2 right-2 w-10 h-10 bg-green-500 border-4 border-[#0B1221] rounded-full shadow-[0_0_15px_rgba(34,197,94,0.6)]"></div>
+                    </div>
+                </div>
+
+                <div className="mb-12">
+                    <h2 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">
+                        {user?.username || 'John Algie Morales'}
+                    </h2>
+                    <p className="text-blue-500 font-black text-[0.7rem] uppercase tracking-[0.4em] italic opacity-80">
+                        VERIFIED PASSENGER • PREMIUM MEMBER
+                    </p>
+                </div>
+
+                {/* Account Actions Cards */}
+                <div className="space-y-4 px-2 flex-1">
+                    {[
+                        { icon: User, label: 'PERSONAL INFORMATION', action: () => alert('Viewing Personal Information Profile') },
+                        { icon: ShieldCheck, label: 'SECURITY & TRAVEL LOGS', action: () => alert('Accessing Security & Travel Logs') },
+                        { icon: Activity, label: 'SETTINGS & ACCESSIBILITY', action: () => setProfileView('accessibility') }
+                    ].map((item, i) => (
+                        <button
+                            key={i}
+                            onClick={item.action}
+                            className="w-full bg-[#151D2E]/80 backdrop-blur-xl border border-white/5 rounded-[2.5rem] p-6 flex items-center justify-between group active:scale-[0.98] transition-all hover:bg-[#1A2538]"
+                        >
+                            <div className="flex items-center space-x-6">
+                                <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
+                                    <item.icon size={26} strokeWidth={2.5} />
+                                </div>
+                                <span className="font-extrabold text-lg text-white italic tracking-tight uppercase">{item.label}</span>
+                            </div>
+                            <ChevronRight size={22} className="text-slate-600 group-hover:translate-x-1 transition-transform" />
+                        </button>
+                    ))}
+                </div>
+
+                {/* Futuristic Sign Out Panel */}
+                <div className="mt-12 px-2 pb-10">
+                    <button
+                        onClick={() => { logout(); navigate('/'); }}
+                        className="w-full bg-red-600 text-white py-7 rounded-[2rem] font-black text-xl shadow-[0_15px_30px_-5px_rgba(220,38,38,0.5)] active:scale-95 transition-all flex items-center justify-center space-x-4 uppercase italic tracking-[0.2em] border-b-[10px] border-red-800"
+                    >
+                        <LogOut size={28} strokeWidth={3} />
+                        <span>Sign Out Panel</span>
+                    </button>
+                </div>
+            </div>
+        );
     };
 
-    if (view === 'receipt' && receiptData) {
-        return (
-            <div className="h-full bg-slate-50 p-6 flex flex-col items-center justify-center relative">
-                <button
-                    onClick={() => setView('search')}
-                    className="absolute top-4 left-4 p-2 bg-white rounded-full shadow-sm text-slate-500"
-                >
-                    <ChevronRight className="rotate-180" size={24} />
-                </button>
-
-                <h2 className="text-2xl font-bold text-slate-800 mb-6">E-Receipt</h2>
-
-                <div className="bg-white w-full max-w-sm rounded-3xl shadow-xl overflow-hidden relative">
-                    {/* Receipt Tear Effect (Visual Mock) */}
-                    <div className="bg-slate-800 h-2 w-full"></div>
-
-                    <div className="p-8 space-y-4">
-                        <div className="text-center border-b border-slate-100 pb-6 mb-4">
-                            <p className="text-slate-500 text-sm mb-1">Today's Fare Collection</p>
-                            <h1 className="text-4xl font-extrabold text-slate-800">Php {receiptData.amount}</h1>
-                        </div>
-
-                        <div className="space-y-3 text-sm">
-                            <div className="flex justify-between text-slate-600">
-                                <span>Regular Fare</span>
-                                <span className="font-bold">Php 900.00</span>
-                            </div>
-                            <div className="flex justify-between text-slate-600">
-                                <span>Discounted Fare</span>
-                                <span className="font-bold">Php 720.00</span>
-                            </div>
-                            <div className="flex justify-between text-slate-600">
-                                <span>Fare Adjustment</span>
-                                <span className="font-bold">Php 750.00</span>
-                            </div>
-                            <div className="border-t border-slate-100 pt-3 flex justify-between text-slate-800 font-bold text-lg">
-                                <span>Total:</span>
-                                <span>Php 1,850.00</span>
-                            </div>
-                        </div>
-
-                        <button className="w-full mt-6 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 rounded-xl flex items-center justify-center space-x-2">
-                            <CreditCard size={18} />
-                            <span>Share E-Receipt</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )
-    }
-
-    if (view === 'payment') {
-        return (
-            <div className="h-full bg-cyan-400 p-6 flex flex-col items-center relative">
-                <button
-                    onClick={() => setView('map')}
-                    className="absolute top-4 left-4 p-2 bg-white/20 text-white rounded-full hover:bg-white/30 backdrop-blur-md"
-                >
-                    <ChevronRight className="rotate-180" size={28} />
-                </button>
-
-                <div className="w-full max-w-sm mt-8 text-center">
-                    <h1 className="text-red-500 font-black text-4xl mb-8 tracking-widest drop-shadow-sm uppercase">FARE</h1>
-
-                    <div className="bg-white rounded-xl shadow-lg p-2 mb-6">
-                        <div className="text-slate-800 font-bold text-3xl py-4">
-                            Php. 39.00
-                        </div>
-                    </div>
-
-                    <div className="space-y-4">
-                        {/* Mock Payment Buttons */}
-                        <div className="bg-white rounded-xl p-4 shadow-md flex items-center justify-center h-16 cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => handlePayment('GCash')}>
-                            <span className="text-blue-600 font-bold text-xl flex items-center"><span className="mr-1">G</span> GCash</span>
-                        </div>
-                        <div className="bg-white rounded-xl p-4 shadow-md flex items-center justify-center h-16 cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => handlePayment('GrabPay')}>
-                            <span className="text-green-600 font-bold text-xl">GrabPay</span>
-                        </div>
-                        <div className="bg-white rounded-xl p-4 shadow-md flex items-center justify-center h-16 cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => handlePayment('PayMaya')}>
-                            <span className="text-green-500 font-bold text-xl flex items-center"><span className="bg-green-500 text-white rounded p-0.5 mr-1 text-xs">P</span> PayMaya</span>
-                        </div>
-
-                        <button className="w-full bg-red-500 hover:bg-red-600 text-white font-black text-2xl py-4 rounded-xl shadow-lg mt-8 uppercase tracking-wider">
-                            PAY NOW
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )
-    }
-
     return (
-        <div className="relative h-screen bg-slate-100 overflow-hidden">
-            {/* 1. Map Layer - Always in background */}
-            <div className="absolute inset-0 z-0">
-                <RouteMap />
-            </div>
-
-            {/* 2. Header Overlay */}
-            <div className="absolute top-0 left-0 right-0 z-20 p-6 flex justify-between items-center bg-gradient-to-b from-white/90 to-transparent pt-8 pb-12 pointer-events-none">
-                <div className="flex items-center space-x-2 pointer-events-auto">
-                    <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-100">
-                        <MapPin className="text-red-500 fill-current" size={28} />
-                    </div>
-                    <h1 className="text-2xl font-black text-slate-800 tracking-tight">
-                        Inclusive<span className="text-red-500">.Route</span>
-                    </h1>
+        <div className={`relative h-screen overflow-hidden flex flex-col items-center transition-colors duration-500 ${accessibility.highContrast ? 'bg-slate-950 text-white' : 'bg-slate-900'}`}>
+            <div className={`w-full max-w-[480px] h-full relative flex flex-col shadow-2xl`}>
+                <div className="absolute inset-0 z-0">
+                    <RouteMap />
                 </div>
-                <div className="w-12 h-12 bg-white rounded-2xl border-2 border-white shadow-md pointer-events-auto overflow-hidden">
-                    <img
-                        src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix"
-                        alt="User"
-                        className="w-full h-full object-cover"
-                    />
+
+                <div className={`absolute top-0 left-0 right-0 z-[70] p-6 pt-10 flex flex-col space-y-4 ${activeTab !== 'map' ? 'bg-[#0B1221] shadow-sm' : 'bg-gradient-to-b from-black/20 to-transparent'}`}>
+                    <div className="flex justify-between items-center">
+                        <div className="flex items-center space-x-2">
+                            <MapPin className="text-red-500" size={24} />
+                            <h1 className={`text-xl font-black uppercase italic text-white`}>Inclu<span className="text-red-500">.Route</span></h1>
+                        </div>
+                        <button onClick={() => { setActiveTab('profile'); setProfileView('main'); }} className="w-12 h-12 rounded-2xl border-4 border-white shadow-xl overflow-hidden">
+                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="User" />
+                        </button>
+                    </div>
+
+                    {activeTab === 'map' && (
+                        <div className="rounded-[2.5rem] p-5 flex items-center space-x-5 bg-[#0B1221] backdrop-blur-2xl border border-white/10 shadow-2xl">
+                            <div className="bg-blue-600 w-16 h-16 rounded-[1.2rem] flex items-center justify-center shadow-2xl">
+                                <Compass className={`text-white ${!currentAddress ? 'animate-spin' : 'animate-spin-slow'}`} size={32} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-[0.6rem] font-black text-blue-500 uppercase tracking-widest italic mb-1">Live Roadmap Feed</p>
+                                <h3 className="font-black text-white text-xl uppercase italic truncate">{currentAddress || 'Syncing...'}</h3>
+                            </div>
+                        </div>
+                    )}
                 </div>
-            </div>
 
-            {/* 3. Floating Search & Popular Destinations */}
-            {view === 'search' && (
-                <div className="absolute top-24 left-6 right-6 z-30 pointer-events-auto flex flex-col space-y-4 max-h-[70vh] animate-in slide-in-from-top-10 duration-500">
-                    {/* Current Location Hook */}
-                    <div className="bg-blue-600 rounded-[2rem] p-5 text-white shadow-2xl flex items-center space-x-4 border border-blue-400 group active:scale-[0.98] transition-transform">
-                        <div className="bg-white/20 p-3 rounded-2xl shadow-inner relative overflow-hidden">
-                            <MapPin size={26} fill="white" className="relative z-10" />
-                            <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
-                        </div>
-                        <div className="flex-1 overflow-hidden">
-                            <p className="text-white/60 text-[0.55rem] font-black uppercase tracking-[0.25em] mb-1 italic">You are currently here</p>
-                            <h3 className="font-black text-lg tracking-tight truncate leading-none">
-                                {currentAddress || "Locating your GPS..."}
-                            </h3>
-                        </div>
-                        <div className="w-2 h-2 bg-green-400 rounded-full animate-ping"></div>
-                    </div>
-
-                    {/* HUGE DESTINATION PROMPT */}
-                    <div className="px-2 py-2 flex items-end justify-between">
-                        <h2 className="text-5xl font-black text-slate-900 tracking-tighter uppercase italic leading-[0.85] drop-shadow-xl animate-in fade-in zoom-in duration-700">
-                            CHOOSE<br />
-                            <span className="text-blue-600">DESTINATION</span>
-                        </h2>
-                        <span className="text-6xl animate-bounce mb-2">🚌</span>
-                    </div>
-
-                    {/* Search Bar */}
-                    <div className="bg-white/95 backdrop-blur-md shadow-2xl rounded-3xl p-1.5 border border-white/50">
-                        <PlacesAutocomplete onPlaceSelected={handlePlaceSelected} />
-                    </div>
-
-                    {/* Popular Destinations Scrollable Card */}
-                    <div className="bg-white/90 backdrop-blur-md shadow-xl rounded-[2.5rem] p-6 border border-white/50 overflow-hidden flex flex-col">
-                        <div className="flex items-center justify-between mb-4 px-2">
-                            <h2 className="text-blue-600 font-black text-xl tracking-tight uppercase">Recent Favorites</h2>
-                            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
-                        </div>
-
-                        <div className="space-y-3 overflow-y-auto pr-2 custom-scrollbar max-h-[40vh]">
-                            {popularDestinations.map((dest, i) => (
-                                <button
-                                    key={i}
-                                    onClick={() => handlePlaceSelected({
-                                        name: dest.name,
-                                        location: { lat: 14.32, lng: 121.08 }, // Mock coords for quick demo
-                                        address: dest.location
-                                    })}
-                                    className="w-full bg-white/60 p-4 rounded-2xl border border-blue-50 hover:border-blue-200 hover:bg-blue-50/50 transition-all flex items-center justify-between group active:scale-[0.98]"
-                                >
-                                    <div className="flex items-center space-x-4 text-left">
-                                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${dest.color} shadow-sm group-hover:scale-110 transition-transform`}>
-                                            <Bus size={22} className="group-hover:rotate-12 transition-transform" />
-                                        </div>
-                                        <div>
-                                            <h3 className="font-extrabold text-slate-800 text-lg leading-tight">{dest.name}</h3>
-                                            <p className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{dest.location}</p>
-                                        </div>
-                                    </div>
-                                    <div className="bg-blue-50 p-2 rounded-xl group-hover:bg-blue-500 group-hover:text-white transition-colors">
-                                        <ChevronRight size={18} strokeWidth={3} />
-                                    </div>
-                                </button>
-                            ))}
+                {activeTab === 'map' && (
+                    <div className="absolute inset-0 flex items-center px-6 z-20 pointer-events-none">
+                        <div className="w-full pointer-events-auto">
+                            <PlacesAutocomplete onPlaceSelected={handlePlaceSelected} favorites={popularDestinations} />
                         </div>
                     </div>
-                </div>
-            )}
+                )}
 
-            {/* 4. Location Status Indicator */}
-            <div className="absolute bottom-10 left-6 z-20 pointer-events-auto">
-                <div className="bg-white/90 backdrop-blur-md px-4 py-2 rounded-full shadow-lg border border-slate-100 flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
-                    <span className="text-[0.7rem] font-black text-slate-700 uppercase tracking-widest leading-none">GPS Live</span>
-                </div>
-            </div>
+                {activeTab === 'favorites' && renderFavorites()}
+                {activeTab === 'profile' && renderProfile()}
 
-            {/* 5. Quick Action Button (Lower Right) */}
-            <div className="absolute bottom-10 right-6 z-20 pointer-events-auto">
-                <button
-                    onClick={() => setView('search')}
-                    className="w-16 h-16 bg-blue-600 hover:bg-blue-700 text-white rounded-[2rem] shadow-2xl shadow-blue-400/50 flex items-center justify-center transition-all hover:rotate-12 active:scale-90"
-                >
-                    <Navigation size={28} fill="currentColor" />
-                </button>
+                <div className={`absolute bottom-0 left-0 right-0 z-[75] bg-[#0B1221]/80 backdrop-blur-3xl border-t border-white/20 shadow-2xl rounded-t-[3rem] pb-2`}>
+                    <div className="flex justify-around py-6 pb-10 px-10">
+                        <NavButton id="map" icon={Home} label="Map" />
+                        <NavButton id="favorites" icon={Heart} label="Saved" />
+                        <NavButton id="profile" icon={User} label="Profile" />
+                    </div>
+                </div>
             </div>
         </div>
     );

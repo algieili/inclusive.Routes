@@ -1,4 +1,3 @@
-
 import React, { createContext, useState, useContext, useEffect } from 'react';
 
 const AuthContext = createContext();
@@ -16,17 +15,21 @@ export const AuthProvider = ({ children }) => {
     });
 
     useEffect(() => {
-        // Simulate checking local storage for potential persistence
-        const storedUser = localStorage.getItem('inclusive_user');
-        const storedAccess = localStorage.getItem('inclusive_accessibility');
+        try {
+            const storedUser = localStorage.getItem('inclusive_user');
+            const storedAccess = localStorage.getItem('inclusive_accessibility');
 
-        if (storedUser) {
-            setUser(JSON.parse(storedUser));
+            if (storedUser && storedUser !== "undefined") {
+                setUser(JSON.parse(storedUser));
+            }
+            if (storedAccess && storedAccess !== "undefined") {
+                setAccessibility(JSON.parse(storedAccess));
+            }
+        } catch (e) {
+            console.error("Auth initialization error:", e);
+        } finally {
+            setLoading(false);
         }
-        if (storedAccess) {
-            setAccessibility(JSON.parse(storedAccess));
-        }
-        setLoading(false);
     }, []);
 
     const updateAccessibility = (newSettings) => {
@@ -45,13 +48,13 @@ export const AuthProvider = ({ children }) => {
     const logout = () => {
         setUser(null);
         localStorage.removeItem('inclusive_user');
-        // Keep accessibility settings even after logout? 
-        // Usually good for accessibility consistency.
     };
 
     const register = (userData) => {
         console.log("Registered:", userData);
         const newUser = { role: 'passenger', username: userData.email, name: userData.name, id: Date.now() };
+        setUser(newUser);
+        localStorage.setItem('inclusive_user', JSON.stringify(newUser));
         return true;
     };
 
